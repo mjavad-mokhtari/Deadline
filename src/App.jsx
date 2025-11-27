@@ -1,88 +1,154 @@
-import React, { useState, useEffect } from 'react';
-import { ensureFile, readTasks, saveTasks } from './googleDrive.js';
+/* global google */
+import React, { useEffect, useRef, useState } from 'react'
+import { ensureFile, readTasks, saveTasks } from './googleDrive.js'
 
-// ================================
-// ⚡ Web-ready App.jsx for GCalTasker Drive
-// Instructions:
-// 1. Replace 'YOUR_CLIENT_ID' below with your Google OAuth Client ID
-// 2. Make sure your Google Cloud OAuth Origin includes your web domain
-// 3. Build with 'npm run build' and deploy to any static web host
-// ================================
+const SCOPES = 'https://www.googleapis.com/auth/drive.file'
+const CLIENT_ID_PLACEHOLDER = 'YOUR_CLIENT_ID.apps.googleusercontent.com' // <-- replace this
 
-export default function App() {
-  const [token, setToken] = useState(null);
-  const [fileId, setFileId] = useState(null);
-  const [tasks, setTasks] = useState([]);
-  const [title, setTitle] = useState('');
-  const [deadline, setDeadline] = useState('');
+function formatDate(d){ try{ return new Date(d).toLocaleString() }catch(e){return '-'} }
+function msToDHMS(ms){
+  if(ms<=0) return '0s'
+  const s = Math.floor(ms/1000)
+  const days = Math.floor(s/86400)
+  const hours = Math.floor((s%86400)/3600)
+  const mins = Math.floor((s%3600)/60)
+  if(days>0) return `${days}d ${hours}h`
+  if(hours>0) return `${hours}h ${mins}m`
+  return `${mins}m`
+}
 
-  useEffect(() => {
-    // Initialize Google Identity Services (client-side OAuth)
-    google.accounts.id.initialize({
-      client_id: '993813890788-c8vu6skqleqbn7k7jb2jmco0meuu789r.apps.googleusercontent.com', // << Replace with your Client ID
-      callback: handleCredentialResponse,
-    });
-
-    google.accounts.id.renderButton(document.getElementById('root'), {
-      theme: 'outline',
-      size: 'large'
-    });
-  }, []);
-
-  const handleCredentialResponse = (response) => {
-    setToken(response.credential);
-  };
+export default function App(){
+  const [accessToken, setAccessToken] = useState(null)
+  const [fileId, setFileId] = useState(null)
+  const [tasks, setTasks] = useState([])
+  const [title, setTitle] = useState('')
+  const [deadline, setDeadline] = useState('')
+  const [loading, setLoading] = useState(false)
+  const tokenClientRef = useRef(null)
 
   useEffect(() => {
-    if (!token) return;
-    (async () => {
-      let fid = await ensureFile(token);
-      setFileId(fid);
-      let t = await readTasks(token, fid);
-      setTasks(t.tasks || []);
-    })();
-  }, [token]);
+    # init token client when GSI script ready
+    const interval = setInterval(() => {
+      if(window.google && window.google.accounts && window.google.accounts.oauth2){
+        clearInterval(interval)
+        tokenClientRef.current = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID_PLACEHOLDER,
+          scope: SCOPES,
+          callback: (resp) => {
+            if(resp && resp.access_token){
+              setAccessToken(resp.access_token)
+            } else {
+              console.error('Token response:', resp)
+            }
+          }
+        })
+      }
+    }, 250)
+    return () => clearInterval(interval)
+  }, [])
 
-  const add = async () => {
-    let t = [...tasks, { id: Date.now(), title, deadline, status: 'pending', created: Date.now() }];
-    setTasks(t);
-    await saveTasks(token, fileId, { tasks: t });
-    setTitle('');
-    setDeadline('');
-  };
+  useEffect(() => {
+    if(!accessToken) return
+    (async ()=>{
+      try{
+        setLoading(true)
+        const fid = await ensureFile(accessToken)
+        setFileId(fid)
+        const data = await readTasks(accessToken, fid)
+        setTasks(data.tasks || [])
+      }catch(e){
+        alert('Error loading tasks: ' + e.message)
+      }finally{
+        setLoading(false)
+      }
+    })()
+  }, [accessToken])
 
-  const mark = async (id, status) => {
-    let t = tasks.map(x => x.id === id ? { ...x, status } : x);
-    setTasks(t);
-    await saveTasks(token, fileId, { tasks: t });
-  };
+  useEffect(() => {
+    const t = setInterval(()=> setTasks(ts => [...ts]), 1000)
+    return ()=>clearInterval(t)
+  }, [])
 
-  const color = (d) => {
-    let now = Date.now();
-    let dd = new Date(d).getTime();
-    if (now > dd) return 'red';
-    if (dd - now < 86400000) return 'orange';
-    return 'green';
-  };
+  async function requestAccess(){
+    if(!tokenClientRef.current) return alert('Google client not ready')
+    tokenClientRef.current.requestAccessToken({ prompt: 'consent' })
+  }
 
-  if (!token) return <div></div>;
+  async function addTask(){
+    if(!title || !deadline) return alert('Enter title and deadline')
+    const newTask = { id: Date.now(), title, created: Date.now(), deadline: new Date(deadline).toISOString(), state: 'active' }
+    const updated = [...tasks, newTask]
+    setTasks(updated)
+    setTitle(''); setDeadline('')
+    if(fileId && accessToken){
+      try{ await saveTasks(accessToken, fileId, { tasks: updated }) }catch(e){ alert('Save error: '+e.message) }
+    }
+  }
+
+  async function updateState(id, state){
+    const updated = tasks.map(t => t.id===id?{...t, state}:t)
+    setTasks(updated)
+    if(fileId && accessToken){
+      try{ await saveTasks(accessToken, fileId, { tasks: updated }) }catch(e){ alert('Save error: '+e.message) }
+    }
+  }
+
+  async function removeTask(id){
+    const updated = tasks.filter(t=>t.id!==id)
+    setTasks(updated)
+    if(fileId && accessToken){
+      try{ await saveTasks(accessToken, fileId, { tasks: updated }) }catch(e){ alert('Save error: '+e.message) }
+    }
+  }
 
   return (
-    <div style={{ padding: 20, fontFamily: 'sans-serif' }}>
-      <h2>Tasks</h2>
-      <input placeholder="title" value={title} onChange={e => setTitle(e.target.value)} />
-      <input type="datetime-local" value={deadline} onChange={e => setDeadline(e.target.value)} />
-      <button onClick={add}>Add</button>
-      {tasks.map(t => (
-        <div key={t.id} style={{ border: '1px solid #ccc', margin: 10, padding: 10, background: color(t.deadline) }}>
-          <b>{t.title}</b><br />
-          Created: {new Date(t.created).toLocaleString()}<br />
-          Deadline: {new Date(t.deadline).toLocaleString()}<br />
-          <button onClick={() => mark(t.id, 'done')}>Done</button>
-          <button onClick={() => mark(t.id, 'suspend')}>Suspend</button>
-          <button onClick={() => mark(t.id, 'cancel')}>Cancel</button>
+    <div className="container">
+      <div className="header">
+        <h1>DeadlineT</h1>
+        {!accessToken
+          ? <div style={{display:'flex',gap:8}}><button className="btn" onClick={requestAccess}>Sign in with Google (Drive)</button></div>
+          : <div className="small">Connected</div>
+        }
+      </div>
+
+      <div className="card">
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <input className="input" style={{flex:1}} placeholder="Task title" value={title} onChange={e=>setTitle(e.target.value)} />
+          <input className="input-dt" type="datetime-local" value={deadline} onChange={e=>setDeadline(e.target.value)} />
+          <button className="btn" onClick={addTask}>Add</button>
         </div>
-      ))}
+        <div className="small" style={{marginTop:8}}>Tasks are stored inside your Google Drive file <b>DeadlineT.json</b>. No server — all client-side.</div>
+      </div>
+
+      <div>
+        {loading && <div className="card small">Loading...</div>}
+        {tasks.length===0 && !loading && <div className="card small">No tasks yet.</div>}
+        {tasks.map(t=>{
+          const dl = t.deadline ? new Date(t.deadline).getTime() : null
+          const now = Date.now()
+          const left = dl ? dl - now : null
+          const bg = dl && left<0 ? '#ffecec' : dl && left<=86400000 ? '#fff5e6' : '#ecfff1'
+          return (
+            <div key={t.id} className="task card" style={{background:bg}}>
+              <div>
+                <div style={{fontWeight:700}}>{t.title}</div>
+                <div className="small">Created: {formatDate(t.created)}</div>
+                <div className="small">Deadline: {formatDate(t.deadline)}</div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontWeight:700}}>{left!=null?msToDHMS(left):'-'}</div>
+                <div style={{display:'flex',gap:6,marginTop:8,justifyContent:'flex-end'}}>
+                  {t.state!=='done' && <button className="btn ghost" onClick={()=>updateState(t.id,'done')}>Done</button>}
+                  {t.state!=='suspended' && <button className="btn ghost" onClick={()=>updateState(t.id,'suspended')}>Suspend</button>}
+                  <button className="btn ghost" onClick={()=>removeTask(t.id)}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <footer style={{marginTop:20,fontSize:12,color:'#6b7280'}}>Deploy: Vercel (https://vercel.com) — add the Vercel origin to Google Console. All data stays in your Drive file.</footer>
     </div>
-  );
+  )
 }

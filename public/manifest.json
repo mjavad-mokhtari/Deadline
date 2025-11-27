@@ -1,1 +1,8 @@
-{"name":"GCalTasker Drive","short_name":"Tasker","start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff"}
+{
+  "name": "DeadlineT",
+  "short_name": "DeadlineT",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1976d2"
+}
