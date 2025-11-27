@@ -27,7 +27,7 @@ export default function App(){
   const tokenClientRef = useRef(null)
 
   useEffect(() => {
-    # init token client when GSI script ready
+    // init token client when GSI script ready
     const interval = setInterval(() => {
       if(window.google && window.google.accounts && window.google.accounts.oauth2){
         clearInterval(interval)
