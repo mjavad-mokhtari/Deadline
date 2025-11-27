@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { ensureFile, readTasks, saveTasks } from './googleDrive.js'
 
 const SCOPES = 'https://www.googleapis.com/auth/drive.file'
-const CLIENT_ID_PLACEHOLDER = 'YOUR_CLIENT_ID.apps.googleusercontent.com' // <-- replace this
+const CLIENT_ID_PLACEHOLDER = '470294266004-cat60baqb1rttj9s1sdfcdt2b2op3cpm.apps.googleusercontent.com' // <-- replace this
 
 function formatDate(d){ try{ return new Date(d).toLocaleString() }catch(e){return '-'} }
 function msToDHMS(ms){
